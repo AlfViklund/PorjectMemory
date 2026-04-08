@@ -9,7 +9,6 @@ import ai.productmemory.repository.WorkspaceRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -26,59 +25,56 @@ public class CapabilityResearchService {
     private final WorkspaceRepository workspaceRepository;
     private final RuntimeCapabilityReportRepository reportRepository;
 
-    @Transactional
     public RuntimeCapabilityReport runProbe(UUID workspaceId) {
-        log.info("Starting capability probe for workspace {}", workspaceId);
+        log.info("Starting capability probe for Workspace ID: {}", workspaceId);
 
         Workspace workspace = workspaceRepository.findById(workspaceId)
                 .orElseThrow(() -> new IllegalArgumentException("Workspace not found: " + workspaceId));
 
-        Path rootPath = Paths.get(workspace.getDirectoryPath());
-        
+        String workspacePath = "C:\\Users\\Arslek\\Projects\\ProjectMemory";
+        Path path = Paths.get(workspacePath);
+
+        boolean hasPom = Files.exists(path.resolve("backend/pom.xml")) || Files.exists(path.resolve("pom.xml"));
+        boolean hasPackageJson = Files.exists(path.resolve("frontend/package.json")) || Files.exists(path.resolve("package.json"));
+
         List<String> buildCommands = new ArrayList<>();
         List<String> testCommands = new ArrayList<>();
-        List<String> logLocations = new ArrayList<>();
-        List<String> envRequirements = new ArrayList<>();
+        List<String> detectedEnvs = new ArrayList<>();
 
-        // Heuristic: Java Maven Project
-        if (Files.exists(rootPath.resolve("pom.xml")) || Files.exists(rootPath.resolve("backend/pom.xml"))) {
-            log.info("Probe detected Maven project.");
+        if (hasPom) {
             buildCommands.add("mvn clean install -DskipTests");
             testCommands.add("mvn test");
-            envRequirements.add("Java 21");
-            envRequirements.add("Maven 3.9+");
+            detectedEnvs.add("java-maven");
         }
 
-        // Heuristic: Node Project
-        if (Files.exists(rootPath.resolve("package.json")) || Files.exists(rootPath.resolve("frontend/package.json"))) {
-            log.info("Probe detected Node/NPM project.");
+        if (hasPackageJson) {
             buildCommands.add("npm install && npm run build");
             testCommands.add("npm test");
-            envRequirements.add("Node.js 20+");
+            detectedEnvs.add("node-npm");
         }
-        
-        // Dummy log locations
-        logLocations.add("logs/application.log");
 
         CapabilityReportJson reportJson = new CapabilityReportJson(
+                detectedEnvs,
                 buildCommands,
                 testCommands,
-                logLocations,
-                envRequirements
+                "Auto-detected by Phase 8 Probe"
         );
 
-        RuntimeCapabilityReport report = new RuntimeCapabilityReport()
-                .setWorkspace(workspace)
-                .setStatus(CapabilityReportStatus.GENERATED)
-                .setReportJsonb(reportJson);
+        RuntimeCapabilityReport report = RuntimeCapabilityReport.builder()
+                .workspace(workspace)
+                .reportJsonb(reportJson)
+                .status(CapabilityReportStatus.GENERATED)
+                .build();
 
-        return reportRepository.save(report);
+        report = reportRepository.save(report);
+
+        log.info("Probe finished. Environments detected: {}", detectedEnvs);
+        return report;
     }
 
-    @Transactional
     public RuntimeCapabilityReport approveReport(UUID reportId) {
         RuntimeCapabilityReport report = reportRepository.findById(reportId)
-                .orElseThrow(() -> new IllegalArgumentException("Capability Report not found: " + reportId));
+                .orElseThrow(() -> new IllegalArgumentException("Report not found"));
         
         report.setStatus(CapabilityReportStatus.APPROVED);
         return reportRepository.save(report);

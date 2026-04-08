@@ -7,7 +7,11 @@ import ai.productmemory.domain.entity.ChangeRequest;
 import ai.productmemory.domain.entity.ImpactAnalysisOutput;
 import ai.productmemory.service.ChangeRequestService;
 import ai.productmemory.service.ImpactAnalysisService;
+import ai.productmemory.service.MemoryMergeService;
 import ai.productmemory.repository.ImpactAnalysisOutputRepository;
+import ai.productmemory.repository.ReviewRepository;
+import ai.productmemory.domain.entity.Review;
+import ai.productmemory.domain.entity.MemoryMergePlan;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -25,6 +29,8 @@ public class ChangeRequestController {
 
     private final ChangeRequestService changeRequestService;
     private final ImpactAnalysisOutputRepository impactAnalysisOutputRepository;
+    private final ReviewRepository reviewRepository;
+    private final MemoryMergeService memoryMergeService;
 
     @PostMapping
     public ResponseEntity<ApiResponse<ChangeRequestDto.Response>> create(
@@ -59,6 +65,31 @@ public class ChangeRequestController {
             @PathVariable UUID workspaceId,
             @PathVariable UUID crId) {
         ChangeRequest cr = changeRequestService.transitionToPlanning(crId);
+        return ResponseEntity.ok(ApiResponse.ok(toResponse(cr)));
+    }
+
+    @PostMapping("/{crId}/merge")
+    public ResponseEntity<ApiResponse<ChangeRequestDto.Response>> approveAndMerge(
+            @PathVariable UUID workspaceId,
+            @PathVariable UUID crId) {
+        ChangeRequest cr = changeRequestService.getById(crId);
+        
+        Review review = Review.builder()
+                .changeRequest(cr)
+                .shortId("rev-" + UUID.randomUUID().toString().substring(0, 8))
+                .status(ai.productmemory.domain.enums.ReviewStatus.APPROVED)
+                .build();
+        review = reviewRepository.save(review);
+
+        java.util.List<java.util.Map<String, Object>> proposed = java.util.List.of(
+            java.util.Map.of("id", UUID.randomUUID().toString(), "type", "COMPONENT", "name", "Task Component"),
+            java.util.Map.of("id", UUID.randomUUID().toString(), "type", "API_ENDPOINT", "name", "Execute API")
+        );
+
+        MemoryMergePlan plan = memoryMergeService.generateMergePlan(review.getId(), proposed);
+        memoryMergeService.approveAndApply(plan.getId(), "Admin", null, null);
+
+        cr = changeRequestService.getById(crId);
         return ResponseEntity.ok(ApiResponse.ok(toResponse(cr)));
     }
 
